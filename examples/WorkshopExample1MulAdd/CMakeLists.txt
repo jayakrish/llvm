@@ -1,13 +1,13 @@
 set(LLVM_LINK_COMPONENTS
   BitWriter
   Core
-  Support
   ExecutionEngine
   Interpreter
   MC
+  Support
   nativecodegen
   )
 
-add_llvm_example(ModuleMaker
-  ModuleMaker.cpp
+add_llvm_example(WorkshopExample1MulAdd
+  WorkshopExample1MulAdd.cpp
   )

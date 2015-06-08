@@ -1,4 +1,4 @@
-##===- examples/ModuleMaker/Makefile -----------------------*- Makefile -*-===##
+##===- examples/Fibonacci/Makefile -------------------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #
@@ -6,9 +6,12 @@
 # License. See LICENSE.TXT for details.
 # 
 ##===----------------------------------------------------------------------===##
-LEVEL=../..
-TOOLNAME=ModuleMaker
+
+LEVEL = ../..
+TOOLNAME = WorkshopExample1MulAdd
 EXAMPLE_TOOL = 1
-LINK_COMPONENTS := bitwriter interpreter mcjit nativecodegen
+
+# Link in JIT support
+LINK_COMPONENTS := interpreter mcjit nativecodegen bitwriter
 
 include $(LEVEL)/Makefile.common
