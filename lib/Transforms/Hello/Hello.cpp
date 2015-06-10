@@ -27,7 +27,7 @@ using namespace llvm;
 #define DEBUG_TYPE "hello"
 
 STATISTIC(HelloCounter, "Counts number of functions greeted");
-STATISTIC(InstructionCounter, "Counts number of functions seen");
+STATISTIC(InstructionCounter, "Counts number of functions in a module");
 
 namespace {
   // Hello - The first implementation, without getAnalysisUsage.
