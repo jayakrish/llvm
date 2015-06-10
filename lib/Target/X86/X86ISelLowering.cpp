@@ -2233,7 +2233,9 @@ static bool IsCCallConvention(CallingConv::ID CC) {
 }
 
 bool X86TargetLowering::mayBeEmittedAsTailCall(CallInst *CI) const {
-  if (!CI->isTailCall() || getTargetMachine().Options.DisableTailCalls)
+  auto Attr =
+      CI->getParent()->getParent()->getFnAttribute("disable-tail-calls");
+  if (!CI->isTailCall() || Attr.getValueAsString() == "true")
     return false;
 
   CallSite CS(CI);
@@ -2762,8 +2764,9 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   StructReturnType SR = callIsStructReturn(Outs);
   bool IsSibcall      = false;
   X86MachineFunctionInfo *X86Info = MF.getInfo<X86MachineFunctionInfo>();
+  auto Attr = MF.getFunction()->getFnAttribute("disable-tail-calls");
 
-  if (MF.getTarget().Options.DisableTailCalls)
+  if (Attr.getValueAsString() == "true")
     isTailCall = false;
 
   if (Subtarget->isPICStyleGOT() &&
@@ -10132,7 +10135,8 @@ static SDValue lowerVectorShuffleWithVALIGN(SDLoc DL, MVT VT,
     else if (Mask[i] - i != AlignVal)
       return SDValue();
   }
-  return DAG.getNode(X86ISD::VALIGN, DL, VT, V1, V2,
+  // Vector source operands should be swapped
+  return DAG.getNode(X86ISD::VALIGN, DL, VT, V2, V1,
                      DAG.getConstant(AlignVal, DL, MVT::i8));
 }
 
@@ -13235,13 +13239,13 @@ static SDValue LowerBoolVSETCC_AVX512(SDValue Op, SelectionDAG &DAG) {
                                DAG.getConstant(-1, dl, VT));
   switch (SetCCOpcode) {
   default: llvm_unreachable("Unexpected SETCC condition");
-  case ISD::SETNE:
-    // (x != y) -> ~(x ^ y)
+  case ISD::SETEQ:
+    // (x == y) -> ~(x ^ y)
     return DAG.getNode(ISD::XOR, dl, VT,
                        DAG.getNode(ISD::XOR, dl, VT, Op0, Op1),
                        DAG.getConstant(-1, dl, VT));
-  case ISD::SETEQ:
-    // (x == y) -> (x ^ y)
+  case ISD::SETNE:
+    // (x != y) -> (x ^ y)
     return DAG.getNode(ISD::XOR, dl, VT, Op0, Op1);
   case ISD::SETUGT:
   case ISD::SETGT:
@@ -15167,6 +15171,30 @@ static SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, const X86Subtarget *Subtarget
                                               Src1,Src2),
                                   Mask, PassThru, Subtarget, DAG);
     }
+    case INTR_TYPE_3OP_MASK: {
+      SDValue Src1 = Op.getOperand(1);
+      SDValue Src2 = Op.getOperand(2);
+      SDValue Src3 = Op.getOperand(3);
+      SDValue PassThru = Op.getOperand(4);
+      SDValue Mask = Op.getOperand(5);
+      // We specify 2 possible opcodes for intrinsics with rounding modes.
+      // First, we check if the intrinsic may have non-default rounding mode,
+      // (IntrData->Opc1 != 0), then we check the rounding mode operand.
+      unsigned IntrWithRoundingModeOpcode = IntrData->Opc1;
+      if (IntrWithRoundingModeOpcode != 0) {
+        SDValue Rnd = Op.getOperand(6);
+        unsigned Round = cast<ConstantSDNode>(Rnd)->getZExtValue();
+        if (Round != X86::STATIC_ROUNDING::CUR_DIRECTION) {
+          return getVectorMaskingNode(DAG.getNode(IntrWithRoundingModeOpcode,
+                                      dl, Op.getValueType(),
+                                      Src1, Src2, Src3, Rnd),
+                                      Mask, PassThru, Subtarget, DAG);
+        }
+      }
+      return getVectorMaskingNode(DAG.getNode(IntrData->Opc0, dl, VT,
+                                              Src1, Src2, Src3),
+                                  Mask, PassThru, Subtarget, DAG);
+    }
     case FMA_OP_MASK: {
       SDValue Src1 = Op.getOperand(1);
       SDValue Src2 = Op.getOperand(2);
@@ -15308,16 +15336,6 @@ static SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, const X86Subtarget *Subtarget
     // but second operand for node/instruction.
     return DAG.getNode(X86ISD::VPERMV, dl, Op.getValueType(),
                        Op.getOperand(2), Op.getOperand(1));
-
-  case Intrinsic::x86_avx512_mask_valign_q_512:
-  case Intrinsic::x86_avx512_mask_valign_d_512:
-    // Vector source operands are swapped.
-    return getVectorMaskingNode(DAG.getNode(X86ISD::VALIGN, dl,
-                                            Op.getValueType(), Op.getOperand(2),
-                                            Op.getOperand(1),
-                                            Op.getOperand(3)),
-                                Op.getOperand(5), Op.getOperand(4),
-                                Subtarget, DAG);
 
   // ptest and testp intrinsics. The intrinsic these come from are designed to
   // return an integer value, not just an instruction so lower it to the ptest
@@ -15473,6 +15491,23 @@ static SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, const X86Subtarget *Subtarget
   }
 
   case Intrinsic::x86_seh_lsda: {
+    // Compute the symbol for the LSDA. We know it'll get emitted later.
+    MachineFunction &MF = DAG.getMachineFunction();
+    SDValue Op1 = Op.getOperand(1);
+    auto *Fn = cast<Function>(cast<GlobalAddressSDNode>(Op1)->getGlobal());
+    MCSymbol *LSDASym = MF.getMMI().getContext().getOrCreateLSDASymbol(
+        GlobalValue::getRealLinkageName(Fn->getName()));
+    StringRef Name = LSDASym->getName();
+    assert(Name.data()[Name.size()] == '\0' && "not null terminated");
+
+    // Generate a simple absolute symbol reference. This intrinsic is only
+    // supported on 32-bit Windows, which isn't PIC.
+    SDValue Result =
+        DAG.getTargetExternalSymbol(Name.data(), VT, X86II::MO_NOPREFIX);
+    return DAG.getNode(X86ISD::Wrapper, dl, VT, Result);
+  }
+
+  case Intrinsic::eh_exceptioninfo: {
     // Compute the symbol for the LSDA. We know it'll get emitted later.
     MachineFunction &MF = DAG.getMachineFunction();
     SDValue Op1 = Op.getOperand(1);
@@ -25502,6 +25537,10 @@ X86TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
         Res.first = DestReg;
         Res.second = &X86::GR64RegClass;
       }
+    } else if (VT != MVT::Other) {
+      // Type mismatch and not a clobber: Return an error;
+      Res.first = 0;
+      Res.second = nullptr;
     }
   } else if (Res.second == &X86::FR32RegClass ||
              Res.second == &X86::FR64RegClass ||
@@ -25527,6 +25566,15 @@ X86TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
       Res.second = &X86::VR256RegClass;
     else if (X86::VR512RegClass.hasType(VT))
       Res.second = &X86::VR512RegClass;
+    else if (VT != MVT::Other) {
+      // Type mismatch and not a clobber: Return an error;
+      Res.first = 0;
+      Res.second = nullptr;
+    }
+  } else if (VT != MVT::Other) {
+    // Type mismatch and not a clobber: Return an error;
+    Res.first = 0;
+    Res.second = nullptr;
   }
 
   return Res;
