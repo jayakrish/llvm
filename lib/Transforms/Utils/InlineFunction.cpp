@@ -923,7 +923,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
          "Instruction not in function!");
 
   // If IFI has any state in it, zap it before we fill it in.
-  IFI.reset();
+  /*IFI.reset();
   
   const Function *CalledFunc = CS.getCalledFunction();
   if (!CalledFunc ||              // Can't inline external function or indirect
@@ -1032,7 +1032,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // (which can happen, e.g., because an argument was constant), but we'll be
     // happy with whatever the cloner can do.
     CloneAndPruneFunctionInto(Caller, CalledFunc, VMap,
-                              /*ModuleLevelChanges=*/false, Returns, ".i",
+                              /*ModuleLevelChanges=*/ /*false, Returns, ".i",
                               &InlinedFunctionInfo, TheCall);
 
     // Remember the first block that is newly cloned over.
@@ -1104,7 +1104,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // Move any dbg.declares describing the allocas into the entry basic block.
     DIBuilder DIB(*Caller->getParent());
     for (auto &AI : IFI.StaticAllocas)
-      replaceDbgDeclareForAlloca(AI, AI, DIB, /*Deref=*/false);
+      replaceDbgDeclareForAlloca(AI, AI, DIB, /*Deref=*/ /*false);
   }
 
   bool InlinedMustTailCalls = false;
@@ -1288,7 +1288,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
 
     // Since we are now done with the return instruction, delete it also.
     Returns[0]->eraseFromParent();
-
+    
     // We are now done with the inlining.
     return true;
   }
@@ -1444,6 +1444,6 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       PHI->eraseFromParent();
     }
   }
-
+  */
   return true;
 }
